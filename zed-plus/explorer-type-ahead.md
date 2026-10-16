@@ -41,7 +41,17 @@ Conforme solicitado, o executável teve prioridade: nenhum teste automatizado fo
 
 ### Build release solicitado
 
-Após o commit desta feature, o usuário solicitou compilar o perfil `release`, sem testes. Compilação otimizada ainda pendente; o resultado será registrado após a execução.
+- Comando iniciado após o commit: `cargo build --release --locked -j 2`.
+- Perfil `release` padrão do repositório, com `lto = "thin"`; sem mudanças em `Cargo.toml` ou nos flags Rust.
+- Não havia cache anterior em `target/release`: as dependências foram recompiladas no perfil otimizado.
+- A primeira tentativa falhou em **3min09s** com `E0514` em `gpui_util`: dependências geradas com Rust 1.95.0 e código do workspace compilado com 1.98.1. O launcher chamava o Cargo diretamente sem fixar a toolchain dos subprocessos; o shim `rustc` selecionava versões diferentes conforme o diretório de trabalho.
+- Correção apenas no launcher temporário: fixar `RUSTUP_TOOLCHAIN=1.98.1-x86_64-pc-windows-msvc` e `RUSTC` no executável dessa versão. Confirmado que uma dependência nova contém metadados do Rust 1.98.1.
+- Executado `cargo clean --release` para remover os artefatos incompatíveis, preservando `target/debug/zed.exe`. Primeira tentativa arquivada em `%TEMP%/zed-plus-release-build.attempt1.log` e arquivos associados.
+- Após reiniciar com a toolchain fixada, o build **concluiu com sucesso em 153min12s (2h33min12s)**, perfil `release` (`optimized + debuginfo`), código de saída `0`. Testes não foram compilados nem executados.
+- Executável gerado e existência confirmada: `target/release/zed.exe` (**363.192.320 bytes**), a partir do commit `8824dbc734e152a49c4d87b368b2c63929703160`.
+- O release não foi aberto automaticamente, conforme orientação posterior do usuário. Validação em execução do release ainda pendente.
+- Registro local da compilação: `%TEMP%/zed-plus-release-build.log`, `.json` e `.exit`; este último contém `0`.
+- O executável debug já aberto e o Preview instalado não são substituídos por este build.
 
 ### Validação manual sugerida
 
@@ -54,4 +64,5 @@ Após o commit desta feature, o usuário solicitou compilar o perfil `release`, 
 
 ## Commits
 
-Commit solicitado pelo usuário. O hash será registrado após a criação do commit.
+- `8824dbc734e152a49c4d87b368b2c63929703160` — `feat(project_panel): select visible tree entries by typing their names`.
+- Hash e resultado do build release registrados após a criação do commit, conforme o fluxo de documentação.

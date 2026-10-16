@@ -135,6 +135,7 @@ Other entities can then register a callback to handle these events by doing `cx.
 ## Build guidelines
 
 - Use `./script/clippy` instead of `cargo clippy`
+- Before starting any compilation (debug/release builds, checks, tests, or commands/scripts that compile), use `ask_questions` to get the user's explicit Cargo job limit (`-j`) for that invocation, unless the current request already specifies it. Show logical CPU count and available RAM when suggesting options; jobs are concurrency, not a hard CPU/core limit. Never silently reuse a previous limit or start before the user answers. Pass the approved `-j` explicitly to Cargo or the compiling wrapper.
 
 # Pull request hygiene
 
