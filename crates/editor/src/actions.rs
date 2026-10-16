@@ -507,6 +507,8 @@ actions!(
         CopyFileNameWithoutExtension,
         /// Copies a permalink to the current line or selection.
         CopyPermalinkToLine,
+        /// Copies a project-relative reference to the current line or selection.
+        CopyReference,
         /// Cuts selected text to the clipboard.
         Cut,
         /// Deletes the character after the cursor.

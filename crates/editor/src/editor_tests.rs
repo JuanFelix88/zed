@@ -11433,6 +11433,15 @@ async fn test_copy_file_location_from_multibuffer(cx: &mut TestAppContext) {
         Some("file.txt:3-5".to_string()),
         "a multi-row selection should report the original file's line range"
     );
+    editor.update_in(cx, |editor, window, cx| {
+        editor.copy_reference(&CopyReference, window, cx);
+    });
+    assert_eq!(
+        cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .as_deref(),
+        Some("file.txt:L3-L5"),
+    );
 }
 
 #[gpui::test]
@@ -11652,6 +11661,96 @@ async fn test_copy_file_location_in_singleton_buffer(cx: &mut TestAppContext) {
     assert_eq!(
         cx.read_from_clipboard().and_then(|item| item.text()),
         Some("file.txt:1-3".to_string())
+    );
+}
+
+#[gpui::test]
+async fn test_copy_reference_keybinding(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/root"),
+        json!({ "src": { "arquivo.ts": "first line\nsecond line\nthird line\nfourth line\n" } }),
+    )
+    .await;
+    let project = Project::test(fs, [path!("/root").as_ref()], cx).await;
+    let buffer = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer(path!("/root/src/arquivo.ts"), cx)
+        })
+        .await
+        .expect("test file should open");
+    let (editor, cx) =
+        cx.add_window_view(|window, cx| Editor::for_buffer(buffer, Some(project), window, cx));
+    cx.update(|_, cx| {
+        cx.bind_keys([gpui::KeyBinding::new(
+            "ctrl-alt-r",
+            CopyReference,
+            Some("Editor"),
+        )]);
+    });
+
+    for (ranges, expected) in [
+        (
+            vec![Point::new(1, 0)..Point::new(1, 0)],
+            "src/arquivo.ts:L2",
+        ),
+        (
+            vec![Point::new(1, 1)..Point::new(1, 5)],
+            "src/arquivo.ts:L2",
+        ),
+        (
+            vec![Point::new(1, 0)..Point::new(2, 3)],
+            "src/arquivo.ts:L2-L3",
+        ),
+        (
+            vec![Point::new(1, 0)..Point::new(3, 0)],
+            "src/arquivo.ts:L2-L3",
+        ),
+        (
+            vec![Point::new(2, 3)..Point::new(1, 0)],
+            "src/arquivo.ts:L2-L3",
+        ),
+        (
+            vec![
+                Point::new(0, 0)..Point::new(0, 0),
+                Point::new(2, 0)..Point::new(2, 0),
+            ],
+            "src/arquivo.ts:L3",
+        ),
+    ] {
+        editor.update_in(cx, |editor, window, cx| {
+            window.focus(&editor.focus_handle(cx), cx);
+            editor.change_selections(Default::default(), window, cx, |selections| {
+                selections.select_ranges(ranges);
+            });
+        });
+        cx.simulate_keystrokes("ctrl-alt-r");
+        assert_eq!(
+            cx.read_from_clipboard()
+                .and_then(|item| item.text())
+                .as_deref(),
+            Some(expected),
+        );
+    }
+}
+
+#[gpui::test]
+async fn test_copy_reference_without_file(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    let buffer = cx.new(|cx| Buffer::local("unsaved text", cx));
+    let (editor, cx) =
+        cx.add_window_view(|window, cx| Editor::for_buffer(buffer, None, window, cx));
+    cx.write_to_clipboard(ClipboardItem::new_string("unchanged".to_string()));
+    editor.update_in(cx, |editor, window, cx| {
+        editor.copy_reference(&CopyReference, window, cx);
+    });
+    assert_eq!(
+        cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .as_deref(),
+        Some("unchanged"),
     );
 }
 

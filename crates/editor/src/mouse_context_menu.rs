@@ -1,8 +1,8 @@
 use crate::{
-    Copy, CopyAndTrim, CopyPermalinkToLine, Cut, DisplayPoint, DisplaySnapshot, Editor,
-    EvaluateSelectedText, FindAllReferences, GoToDeclaration, GoToDefinition, GoToImplementation,
-    GoToTypeDefinition, Paste, Rename, RevealInFileManager, RunToCursor, SelectMode,
-    SelectionEffects, SelectionExt, ToDisplayPoint, ToggleCodeActions,
+    Copy, CopyAndTrim, CopyPermalinkToLine, CopyReference, Cut, DisplayPoint, DisplaySnapshot,
+    Editor, EvaluateSelectedText, FindAllReferences, GoToDeclaration, GoToDefinition,
+    GoToImplementation, GoToTypeDefinition, Paste, Rename, RevealInFileManager, RunToCursor,
+    SelectMode, SelectionEffects, SelectionExt, ToDisplayPoint, ToggleCodeActions,
     actions::{Format, FormatSelections},
     selections_collection::SelectionsCollection,
 };
@@ -11,6 +11,7 @@ use gpui::{Context, DismissEvent, Entity, Focusable as _, Pixels, Point, Subscri
 use project::DisableAiSettings;
 use std::ops::Range;
 use text::PointUtf16;
+use util::paths::PathStyle;
 use workspace::OpenInTerminal;
 use zed_actions::agent::AddSelectionToThread;
 use zed_actions::preview::{
@@ -200,6 +201,9 @@ pub fn deploy_context_menu(
 
         let focus = window.focused(cx);
         let has_reveal_target = editor.target_file(cx).is_some();
+        let has_reference = editor
+            .selected_file_location(PathStyle::Unix, "L", cx)
+            .is_some();
         let has_selections = editor
             .selections
             .all::<PointUtf16>(&display_map)
@@ -298,6 +302,7 @@ pub fn deploy_context_menu(
                 .action("Cut", Box::new(Cut))
                 .action("Copy", Box::new(Copy))
                 .action("Copy and Trim", Box::new(CopyAndTrim))
+                .action_disabled_when(!has_reference, "Copy Reference", Box::new(CopyReference))
                 .action("Paste", Box::new(Paste))
                 .separator()
                 .action_disabled_when(
@@ -415,6 +420,45 @@ mod tests {
             }
         "});
         cx.editor(|editor, _window, _app| assert!(editor.mouse_context_menu.is_some()));
+    }
+
+    #[gpui::test]
+    async fn test_copy_reference_context_menu(cx: &mut gpui::TestAppContext) {
+        init_test(cx, |_| {});
+        let mut cx = EditorTestContext::new(cx).await;
+
+        for (state, clicked_position, expected) in [
+            ("ˇaaa\nbbb\nccc\nddd", "aaa\nbˇbb\nccc\nddd", "file:L2"),
+            ("aaa\n«bbb\ncccˇ»\nddd", "aaa\nbbb\ncˇcc\nddd", "file:L2-L3"),
+        ] {
+            cx.set_state(state);
+            let point = cx.display_point(clicked_position);
+            cx.update_editor(|editor, window, cx| {
+                deploy_context_menu(editor, Some(Default::default()), point, window, cx);
+            });
+            cx.run_until_parked();
+
+            let reference = cx
+                .debug_bounds("MENU_ITEM-Copy Reference")
+                .expect("Copy Reference should be in the context menu");
+            let trim = cx
+                .debug_bounds("MENU_ITEM-Copy and Trim")
+                .expect("Copy and Trim should be in the context menu");
+            let paste = cx
+                .debug_bounds("MENU_ITEM-Paste")
+                .expect("Paste should be in the context menu");
+            assert!(trim.origin.y < reference.origin.y);
+            assert!(reference.origin.y < paste.origin.y);
+
+            cx.simulate_click(reference.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            assert_eq!(
+                cx.read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .as_deref(),
+                Some(expected),
+            );
+        }
     }
 
     #[gpui::test]

@@ -267,7 +267,7 @@ use ui::{
     prelude::*, scrollbars::ScrollbarAutoHide, tooltip_container, utils::WithRemSize,
 };
 use ui_input::ErasedEditor;
-use util::{RangeExt, ResultExt, TryFutureExt, maybe, post_inc};
+use util::{RangeExt, ResultExt, TryFutureExt, maybe, paths::PathStyle, post_inc};
 use workspace::{
     CollaboratorId, Item as WorkspaceItem, ItemId, ItemNavHistory, NavigationEntry, OpenInTerminal,
     OpenTerminal, Pane, RestoreOnStartupBehavior, SERIALIZATION_THROTTLE_TIME, SplitDirection,
@@ -9143,41 +9143,55 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(project) = self.project() else {
+            return;
+        };
+        let path_style = project.read(cx).path_style(cx);
+        if let Some(location) = self.selected_file_location(path_style, "", cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(location));
+        }
+    }
+
+    pub fn copy_reference(&mut self, _: &CopyReference, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(reference) = self.selected_file_location(PathStyle::Unix, "L", cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(reference));
+        }
+    }
+
+    fn selected_file_location(
+        &self,
+        path_style: PathStyle,
+        line_prefix: &str,
+        cx: &mut App,
+    ) -> Option<String> {
         let selection = self.selections.newest::<Point>(&self.display_snapshot(cx));
         let multi_buffer_snapshot = self.buffer.read(cx).snapshot(cx);
+        let (buffer, range) = multi_buffer_snapshot
+            .range_to_buffer_range(selection.range())
+            .or_else(|| {
+                // A selection that spans multiple buffers has no single location,
+                // so fall back to the buffer the latest cursor is in.
+                let (buffer, point) =
+                    multi_buffer_snapshot.point_to_buffer_point(selection.head())?;
+                Some((buffer, point..point))
+            })?;
 
-        if let Some(file_location) = maybe!({
-            let (buffer, range) = multi_buffer_snapshot
-                .range_to_buffer_range(selection.range())
-                .or_else(|| {
-                    // A selection that spans multiple buffers has no single location,
-                    // so fall back to the buffer the latest cursor is in.
-                    let (buffer, point) =
-                        multi_buffer_snapshot.point_to_buffer_point(selection.head())?;
-                    Some((buffer, point..point))
-                })?;
+        let start_line = range.start.row + 1;
+        let end_line = range.end.row + 1;
+        let end_line = if range.end.column == 0 && end_line > start_line {
+            end_line - 1
+        } else {
+            end_line
+        };
 
-            let start_line = range.start.row + 1;
-            let end_line = range.end.row + 1;
-
-            let end_line = if range.end.column == 0 && end_line > start_line {
-                end_line - 1
-            } else {
-                end_line
-            };
-
-            let project = self.project()?.read(cx);
-            let file = buffer.file()?;
-            let path = file.path().display(project.path_style(cx));
-
-            let location = if start_line == end_line {
-                format!("{path}:{start_line}")
-            } else {
-                format!("{path}:{start_line}-{end_line}")
-            };
-            Some(location)
-        }) {
-            cx.write_to_clipboard(ClipboardItem::new_string(file_location));
+        let file = buffer.file()?;
+        let path = file.path().display(path_style);
+        if start_line == end_line {
+            Some(format!("{path}:{line_prefix}{start_line}"))
+        } else {
+            Some(format!(
+                "{path}:{line_prefix}{start_line}-{line_prefix}{end_line}"
+            ))
         }
     }
 
