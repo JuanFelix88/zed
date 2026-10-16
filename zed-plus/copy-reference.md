@@ -65,4 +65,5 @@ Testes específicos:
 
 ## Commits
 
-Commit autorizado pelo usuário com os testes automatizados e a validação manual ainda pendentes. O hash será registrado após a criação do commit.
+- `f42328f8f47cc927336f0e50e03f928717fe31af` — `feat(editor): add Copy Reference action to the context menu`.
+- Commit autorizado pelo usuário com os testes automatizados e a validação manual ainda pendentes.

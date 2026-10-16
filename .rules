@@ -188,3 +188,9 @@ Rules emerge from validated patterns, not one-off observations. The workflow is:
 1. Agent notes a pattern during a session.
 2. Team validates the pattern in code review.
 3. A dedicated commit adds the rule with context on *why* it exists.
+
+# Zed Plus documentation
+
+- Document every requested feature or modification in a Markdown file directly under `zed-plus/`.
+- Keep the relevant document updated with the requested behavior, implementation, configuration, and validation results.
+- When the user requests a commit, record the actual resulting commit hash in the relevant documentation after the commit succeeds. Never invent a hash or create an additional commit solely for that update unless requested.
