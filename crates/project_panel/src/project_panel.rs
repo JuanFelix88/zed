@@ -22,11 +22,12 @@ use gpui::{
     ClipboardEntry as GpuiClipboardEntry, ClipboardItem, Context, CursorStyle, DismissEvent, Div,
     DragMoveEvent, Entity, EventEmitter, ExternalDragPayload, ExternalPaths, FileDragPaths,
     FileDropEvent, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, KeyContext,
-    ListHorizontalSizingBehavior, ListSizingBehavior, Modifiers, ModifiersChangedEvent,
-    MouseButton, MouseDownEvent, MouseExitEvent, ParentElement, PathPromptOptions, Pixels, Point,
-    PromptLevel, Render, ScrollStrategy, Stateful, Styled, Subscription, Task,
-    UniformListScrollHandle, WeakEntity, Window, actions, anchored, deferred, div, hsla,
-    linear_color_stop, linear_gradient, point, px, size, transparent_white, uniform_list,
+    KeyDownEvent, ListHorizontalSizingBehavior, ListSizingBehavior, Modifiers,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, ParentElement,
+    PathPromptOptions, Pixels, Point, PromptLevel, Render, ScrollStrategy, Stateful, Styled,
+    Subscription, Task, UniformListScrollHandle, WeakEntity, Window, actions, anchored, deferred,
+    div, hsla, linear_color_stop, linear_gradient, point, px, size, transparent_white,
+    uniform_list,
 };
 use itertools::Itertools;
 use language::DiagnosticSeverity;
@@ -93,6 +94,7 @@ use crate::{
 
 const PROJECT_PANEL_KEY: &str = "ProjectPanel";
 const NEW_ENTRY_ID: ProjectEntryId = ProjectEntryId::MAX;
+const TYPE_AHEAD_TIMEOUT: Duration = Duration::from_secs(1);
 
 struct VisibleEntriesForWorktree {
     worktree_id: WorktreeId,
@@ -149,6 +151,7 @@ pub struct ProjectPanel {
     drag_target_entry: Option<DragTarget>,
     marked_entries: Vec<SelectedEntry>,
     selection: Option<SelectedEntry>,
+    type_ahead: Option<TypeAhead>,
     context_menu: Option<DeployedContextMenu>,
     filename_editor: Entity<Editor>,
     clipboard: Option<ClipboardEntry>,
@@ -167,6 +170,12 @@ pub struct ProjectPanel {
     update_visible_entries_task: UpdateVisibleEntriesTask,
     undo_manager: UndoManager,
     state: State,
+}
+
+struct TypeAhead {
+    prefix: String,
+    last_input_at: Instant,
+    selection: Option<SelectedEntry>,
 }
 
 struct UpdateVisibleEntriesTask {
@@ -714,6 +723,10 @@ impl ProjectPanel {
         let project_panel = cx.new(|cx| {
             let focus_handle = cx.focus_handle();
             cx.on_focus(&focus_handle, window, Self::focus_in).detach();
+            cx.on_blur(&focus_handle, window, |this, _, _| {
+                this.type_ahead = None;
+            })
+            .detach();
 
             cx.subscribe_in(
                 &git_store,
@@ -891,6 +904,7 @@ impl ProjectPanel {
                 drag_target_entry: None,
                 marked_entries: Default::default(),
                 selection: None,
+                type_ahead: None,
                 context_menu: None,
                 filename_editor,
                 clipboard: None,
@@ -1879,6 +1893,7 @@ impl ProjectPanel {
     }
 
     fn select_previous(&mut self, _: &SelectPrevious, window: &mut Window, cx: &mut Context<Self>) {
+        self.type_ahead = None;
         if let Some(edit_state) = &self.state.edit_state
             && edit_state.processing_filename.is_none()
         {
@@ -2403,6 +2418,7 @@ impl ProjectPanel {
     }
 
     fn cancel(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        self.type_ahead = None;
         if cx.stop_active_drag(window) {
             self.clear_drag_state(cx);
             return;
@@ -3241,7 +3257,107 @@ impl ProjectPanel {
         }
     }
 
+    fn select_by_typing(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.focus_handle.is_focused(window) || self.state.edit_state.is_some() {
+            return;
+        }
+
+        let modifiers = event.keystroke.modifiers;
+        let Some(text) = event.keystroke.key_char.as_deref().filter(|text| {
+            !modifiers.control
+                && !modifiers.alt
+                && !modifiers.platform
+                && !modifiers.function
+                && !text.is_empty()
+                && !text.chars().any(char::is_control)
+        }) else {
+            self.type_ahead = None;
+            return;
+        };
+
+        let now = cx.background_executor().now();
+        let text = text.to_lowercase();
+        let previous_search = self.type_ahead.take().filter(|search| {
+            now.duration_since(search.last_input_at) < TYPE_AHEAD_TIMEOUT
+                && search.selection == self.selection
+        });
+        let refining = previous_search
+            .as_ref()
+            .is_some_and(|search| search.prefix != text);
+        let prefix = if let Some(mut search) = previous_search.filter(|_| refining) {
+            search.prefix.push_str(&text);
+            search.prefix
+        } else {
+            text
+        };
+        let start_index = self
+            .selection
+            .and_then(|selection| self.index_for_selection(selection))
+            .map_or(0, |(_, _, index)| index + usize::from(!refining));
+
+        if let Some(selection) = self.find_type_ahead_match(&prefix, start_index, cx) {
+            self.selection = Some(selection);
+            self.marked_entries.clear();
+            self.autoscroll(cx);
+        }
+        self.type_ahead = Some(TypeAhead {
+            prefix,
+            last_input_at: now,
+            selection: self.selection,
+        });
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn find_type_ahead_match(
+        &self,
+        prefix: &str,
+        start_index: usize,
+        cx: &App,
+    ) -> Option<SelectedEntry> {
+        let project = self.project.read(cx);
+        let path_style = project.path_style(cx);
+        let mut first_match = None;
+        let mut base_index = 0;
+        for visible in &self.state.visible_entries {
+            if let Some(worktree) = project.worktree_for_id(visible.worktree_id, cx) {
+                let worktree = worktree.read(cx);
+                let entries_paths = visible.index.get_or_init(|| {
+                    visible
+                        .entries
+                        .iter()
+                        .map(|entry| entry.path.clone())
+                        .collect()
+                });
+                for (index, entry) in visible.entries.iter().enumerate() {
+                    let (_, difference) =
+                        Self::calculate_depth_and_difference(entry, entries_paths);
+                    let name =
+                        entry_display_name(entry, worktree.root_name(), difference, path_style);
+                    if name.to_lowercase().starts_with(prefix) {
+                        let selection = SelectedEntry {
+                            worktree_id: visible.worktree_id,
+                            entry_id: entry.id,
+                        };
+                        if base_index + index >= start_index {
+                            return Some(selection);
+                        }
+                        first_match.get_or_insert(selection);
+                    }
+                }
+            }
+            base_index += visible.entries.len();
+        }
+        first_match
+    }
+
     fn select_next(&mut self, _: &SelectNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.type_ahead = None;
         if let Some(edit_state) = &self.state.edit_state
             && edit_state.processing_filename.is_none()
         {
@@ -7101,16 +7217,7 @@ impl ProjectPanel {
         let (depth, difference) =
             ProjectPanel::calculate_depth_and_difference(entry, entries_paths);
 
-        let filename = if difference > 1 {
-            entry
-                .path
-                .last_n_components(difference)
-                .map_or(String::new(), |suffix| {
-                    suffix.display(path_style).to_string()
-                })
-        } else {
-            entry_file_name(entry, root_name).to_string()
-        };
+        let filename = entry_display_name(entry, root_name, difference, path_style);
 
         let selection = SelectedEntry {
             worktree_id,
@@ -7471,6 +7578,24 @@ fn entry_file_name<'a>(entry: &'a Entry, root_name: &'a RelPath) -> &'a str {
         .unwrap_or_else(|| root_name.as_unix_str())
 }
 
+fn entry_display_name(
+    entry: &Entry,
+    root_name: &RelPath,
+    difference: usize,
+    path_style: PathStyle,
+) -> String {
+    if difference > 1 {
+        entry
+            .path
+            .last_n_components(difference)
+            .map_or(String::new(), |suffix| {
+                suffix.display(path_style).to_string()
+            })
+    } else {
+        entry_file_name(entry, root_name).to_string()
+    }
+}
+
 fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -> usize {
     const ICON_SIZE_FACTOR: usize = 2;
     let mut item_width = depth * ICON_SIZE_FACTOR + item_text_chars;
@@ -7610,6 +7735,7 @@ impl Render for ProjectPanel {
                     },
                 ))
                 .key_context(self.dispatch_context(window, cx))
+                .on_key_down(cx.listener(Self::select_by_typing))
                 .on_action(cx.listener(Self::scroll_up))
                 .on_action(cx.listener(Self::scroll_down))
                 .on_action(cx.listener(Self::scroll_cursor_center))

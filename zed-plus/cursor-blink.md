@@ -35,4 +35,6 @@ Sem alterações na API do `BlinkManager`, em dependências ou em configuraçõe
 
 ## Commits
 
-Commit solicitado pelo usuário sem compilar ou executar os testes. O hash será registrado após a criação do commit.
+- `2cf5ebe61952148f87760b1534dbc974126f0df4` — `feat(editor): use 130 ms cursor blink intervals and 180 ms activity delay`.
+- Commit autorizado sem compilar ou executar os testes.
+- Hash registrado após a criação do commit, conforme o fluxo de documentação.
