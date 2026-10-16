@@ -47,7 +47,7 @@ impl BlinkManager {
         self.show_cursor(cx);
 
         let epoch = self.next_blink_epoch();
-        let interval = Duration::from_millis(500);
+        let interval = Duration::from_millis(180);
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(interval).await;
             this.update(cx, |this, cx| this.resume_cursor_blinking(epoch, cx))

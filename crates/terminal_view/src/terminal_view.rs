@@ -76,7 +76,7 @@ fn viewport_line_for_point(point: Point, display_offset: usize) -> Option<usize>
     }
 }
 
-const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(130);
 
 /// Event to transmit the scroll from the element to the view
 #[derive(Clone, Debug, PartialEq)]

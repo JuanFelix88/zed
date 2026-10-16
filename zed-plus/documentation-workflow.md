@@ -20,4 +20,5 @@ O aviso de revisão no início de `README.md` foi adicionado conforme a regra ob
 
 ## Commits
 
-Commit solicitado pelo usuário. O hash será registrado após a criação do commit.
+- `6b3500654d4beb2e29707713acd0d4db016eb9f2` — `docs: define Zed Plus change documentation workflow`.
+- Hash registrado após a criação do commit, conforme o fluxo acima.
