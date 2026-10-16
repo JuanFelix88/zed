@@ -106,4 +106,6 @@ Builds release longos ficam para a noite/madrugada, mediante solicitação; dura
 
 ## Commits
 
-Commit e push solicitados pelo usuário. O hash real será registrado após a criação do commit.
+- `f103c74f069748e77272397d1948a18c9c58922b` — `docs(build): require explicit approval of Cargo job limits`.
+- Push para `origin/main` concluído com sucesso, incluindo os quatro commits locais anteriores pendentes.
+- Hash e confirmação do push registrados após o commit, conforme o fluxo de documentação.

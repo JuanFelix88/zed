@@ -23,6 +23,7 @@ use askpass::AskPassDelegate;
 use client::zed_urls;
 use collections::{BTreeMap, HashMap, HashSet};
 use db::kvp::KeyValueStore;
+use editor::actions::ExpandAllDiffHunks;
 use editor::{Editor, EditorElement, EditorMode, MultiBuffer, MultiBufferOffset, SizingBehavior};
 use editor::{EditorStyle, RewrapOptions};
 use file_icons::FileIcons;
@@ -155,6 +156,8 @@ actions!(
         ExpandSelectedEntry,
         /// Collapses the selected entry to hide its children.
         CollapseSelectedEntry,
+        /// Opens all changed files and expands their inline diff hunks.
+        ViewFiles,
         /// View unstaged changes
         ViewUnstagedChanges,
         /// View staged changes
@@ -525,6 +528,11 @@ pub fn register(workspace: &mut Workspace) {
             panel.update(cx, |panel, cx| {
                 panel.toggle_commit_editor(&Default::default(), window, cx)
             });
+        }
+    });
+    workspace.register_action(|workspace, action: &ViewFiles, window, cx| {
+        if let Some(panel) = workspace.panel::<GitPanel>(cx) {
+            panel.update(cx, |panel, cx| panel.view_files(action, window, cx));
         }
     });
     workspace.register_action(|workspace, _: &git::Init, window, cx| {
@@ -2664,6 +2672,43 @@ impl GitPanel {
                         .detach_and_notify_err(self.workspace.clone(), window, cx);
                 })
                 .log_err();
+        }
+    }
+
+    fn view_files(&mut self, _: &ViewFiles, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repository) = self.active_repository.as_ref() else {
+            return;
+        };
+        let repository = repository.read(cx);
+        let project_paths = repository
+            .cached_status()
+            .filter(|entry| !entry.status.is_deleted())
+            .filter_map(|entry| repository.repo_path_to_project_path(&entry.repo_path, cx))
+            .unique()
+            .collect::<Vec<_>>();
+
+        for project_path in project_paths {
+            let workspace = self.workspace.clone();
+            window
+                .spawn(cx, async move |cx| {
+                    let item = workspace
+                        .update_in(cx, |workspace, window, cx| {
+                            workspace.open_path(project_path, None, false, window, cx)
+                        })?
+                        .await?;
+                    if let Some(editor) = item.downcast::<Editor>() {
+                        let load_diff_task =
+                            editor.read_with(cx, |editor, _| editor.wait_for_diff_to_load());
+                        if let Some(load_diff_task) = load_diff_task {
+                            load_diff_task.await;
+                        }
+                        editor.update_in(cx, |editor, window, cx| {
+                            editor.expand_all_diff_hunks(&ExpandAllDiffHunks, window, cx);
+                        })?;
+                    }
+                    anyhow::Ok(())
+                })
+                .detach_and_notify_err(self.workspace.clone(), window, cx);
         }
     }
 
@@ -6691,42 +6736,75 @@ impl GitPanel {
                 .gap_1()
                 .justify_between()
                 .child(
-                    ButtonLike::new("diff-button")
+                    h_flex()
+                        .gap_1()
+                        .flex_wrap()
                         .child(
-                            h_flex()
-                                .gap_1()
+                            ButtonLike::new("view-files-button")
                                 .child(
-                                    Icon::new(IconName::Diff)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
+                                    h_flex()
+                                        .gap_1()
+                                        .child(
+                                            Icon::new(IconName::File)
+                                                .size(IconSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(
+                                            Label::new("View Files")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        ),
                                 )
-                                .child(
-                                    Label::new("View Diff")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .when(
-                                    GitPanelSettings::get_global(cx).diff_stats
-                                        && diff_stat_total != DiffStat::default(),
-                                    |this| {
-                                        this.child(ui::DiffStat::new(
-                                            "changes-diff-stat-total",
-                                            diff_stat_total.added as usize,
-                                            diff_stat_total.deleted as usize,
-                                        ))
-                                    },
-                                ),
+                                .disabled(self.entry_count == 0)
+                                .tooltip(Tooltip::for_action_title_in(
+                                    "View Files",
+                                    &ViewFiles,
+                                    &self.focus_handle,
+                                ))
+                                .on_click(|_, _, cx| {
+                                    cx.defer(|cx| {
+                                        cx.dispatch_action(&ViewFiles);
+                                    })
+                                }),
                         )
-                        .tooltip(Tooltip::for_action_title_in(
-                            "View Diff",
-                            &Diff,
-                            &self.focus_handle,
-                        ))
-                        .on_click(|_, _, cx| {
-                            cx.defer(|cx| {
-                                cx.dispatch_action(&Diff);
-                            })
-                        }),
+                        .child(
+                            ButtonLike::new("diff-button")
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .child(
+                                            Icon::new(IconName::Diff)
+                                                .size(IconSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(
+                                            Label::new("View Diff")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                        .when(
+                                            GitPanelSettings::get_global(cx).diff_stats
+                                                && diff_stat_total != DiffStat::default(),
+                                            |this| {
+                                                this.child(ui::DiffStat::new(
+                                                    "changes-diff-stat-total",
+                                                    diff_stat_total.added as usize,
+                                                    diff_stat_total.deleted as usize,
+                                                ))
+                                            },
+                                        ),
+                                )
+                                .tooltip(Tooltip::for_action_title_in(
+                                    "View Diff",
+                                    &Diff,
+                                    &self.focus_handle,
+                                ))
+                                .on_click(|_, _, cx| {
+                                    cx.defer(|cx| {
+                                        cx.dispatch_action(&Diff);
+                                    })
+                                }),
+                        ),
                 )
                 .child(
                     h_flex()
