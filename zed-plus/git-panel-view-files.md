@@ -95,8 +95,10 @@ O exemplo não foi instalado automaticamente. A action opera sobre o repositóri
 - Nenhum teste automatizado adicionado, compilado ou executado. A confirmação da janela não equivale a validar todos os cenários funcionais da feature no release.
 - O tempo não é uma comparação A/B com o primeiro build frio de 2h33: cache e trabalho recompilado diferem. Não é possível atribuir a diferença somente aos 6 jobs.
 - Compilação realizada antes do commit, conforme pedido: `ZED_COMMIT_SHA` e a base registrada pelo launcher são `f103c74f069748e77272397d1948a18c9c58922b`, com a feature ainda não commitada. Nenhuma fonte foi alterada durante o build; o hash do novo commit não está embutido neste executável.
-- O commit solicitado será criado após esta compilação bem-sucedida; o launcher não executa commits Git.
+- Commit criado após esta compilação bem-sucedida, conforme solicitado; o launcher não executa commits Git.
 
 ## Commits
 
-Commit solicitado pelo usuário para depois do build release. O hash real será registrado após sua criação, conforme o fluxo de documentação.
+- `023841e328caa8146965cc55bb171825e6989770` — `feat(git_ui): open changed files with expanded inline diffs`.
+- Hash e confirmação do commit registrados após sua criação, conforme o fluxo de documentação.
+- Nenhum push solicitado ou executado para este commit.
